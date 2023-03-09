@@ -31,6 +31,10 @@ fmt :
 	@echo " > \033[32mFormatting go files ...\033[0m "
 	go fmt ./...
 
+abi:
+	@echo " > \033[32mGenabi...\033[0m "
+	abigen --abi ./bindings/Withdraw/withdraw_abi.json --pkg withdraw --type Withdraw --out ./bindings/Withdraw/Withdraw.go
+
 
 get-lint:
 	curl -sfL https://install.goreleaser.com/github.com/golangci/golangci-lint.sh | sh -s latest
