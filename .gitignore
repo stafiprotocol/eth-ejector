@@ -1,0 +1,48 @@
+# Binaries for programs and plugins
+*.exe
+*.exe~
+*.dll
+*.so
+*.dylib
+.DS_Store
+
+# Test binary, build with `go test -c`
+*.test
+
+# Output of the go coverage tool, specifically when used with LiteIDE
+*.out
+coverage.txt
+
+# IDE
+.idea/
+.vscode/
+.history
+
+# Builds
+build/
+bin/
+site/
+
+# golang
+.env
+keys/
+
+# Chainbridge
+config.toml
+config*.json
+*.block
+
+centrifuge-chain/
+/cfgBuilder/*.toml
+reth_log*.json
+
+# Dependency directories (remove the comment below to include it)
+# vendor/
+log_file/
+log_data/
+conf.toml
+conf_v1.toml
+conf_v2.toml
+conf_dev.toml
+conf_goerli.toml
+conf.api.toml
