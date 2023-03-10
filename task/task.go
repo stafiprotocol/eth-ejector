@@ -9,9 +9,9 @@ import (
 	"github.com/ethereum/go-ethereum/common"
 	"github.com/pkg/errors"
 	"github.com/prysmaticlabs/prysm/v3/beacon-chain/core/signing"
-	"github.com/prysmaticlabs/prysm/v3/config/params"
 	types "github.com/prysmaticlabs/prysm/v3/consensus-types/primitives"
 	"github.com/prysmaticlabs/prysm/v3/crypto/bls"
+	"github.com/prysmaticlabs/prysm/v3/encoding/bytesutil"
 	ethpb "github.com/prysmaticlabs/prysm/v3/proto/prysm/v1alpha1"
 	prysmTime "github.com/prysmaticlabs/prysm/v3/time"
 	"github.com/sirupsen/logrus"
@@ -22,6 +22,12 @@ import (
 
 // testnet
 var withdrawAddress = "0xc386e551c828e0b3f0A4AB2241e1e0F051f74496"
+
+// mainnet
+// var withdrawAddress = "0xc386e551c828e0b3f0A4AB2241e1e0F051f74496"
+
+var domainVoluntaryExit = bytesutil.Uint32ToBytes4(0x04000000)
+var shardCommitteePeriod = types.Epoch(256) // ShardCommitteePeriod is the minimum amount of epochs a validator must participate before exiting.
 
 type Task struct {
 	stop             chan struct{}
@@ -116,16 +122,21 @@ func (task *Task) monitorHandler() {
 			logrus.Debug("checkCycle start -----------")
 			currentCycle, err := task.withdrawContract.CurrentWithdrawCycle(task.connection.CallOpts(nil))
 			if err != nil {
-				logrus.Warnf("checkCycle err: %s", err)
+				logrus.Warnf("get currentWithdrawCycle err: %s", err)
 				time.Sleep(6 * time.Second)
 				continue
 			}
 
-			err = task.checkCycle(currentCycle.Int64() - 1)
-			if err != nil {
-				logrus.Warnf("checkCycle err: %s", err)
-				time.Sleep(6 * time.Second)
-				continue
+			start := currentCycle.Int64() - 10
+			end := currentCycle.Int64()
+
+			for i := start; i <= end; i++ {
+				err = task.checkCycle(i)
+				if err != nil {
+					logrus.Warnf("checkCycle %d err: %s", i, err)
+					time.Sleep(6 * time.Second)
+					continue
+				}
 			}
 			logrus.Debug("checkCycle end -----------")
 		}
@@ -135,6 +146,7 @@ func (task *Task) monitorHandler() {
 }
 
 func (task *Task) checkCycle(cycle int64) error {
+	logrus.Debugf("checkCycle %d", cycle)
 	ejectedValidators, err := task.withdrawContract.GetEjectedValidatorsAtCycle(task.connection.CallOpts(nil), big.NewInt(cycle))
 	if err != nil {
 		return err
@@ -142,6 +154,7 @@ func (task *Task) checkCycle(cycle int64) error {
 
 	for _, ejectedValidator := range ejectedValidators {
 		if validator, exist := task.validators[ejectedValidator.Uint64()]; exist {
+			logrus.Infof("validator %d elected at cycle %d", validator.ValidatorIndex, cycle)
 			// check beacon sync status
 			syncStatus, err := task.connection.Eth2Client().GetSyncStatus()
 			if err != nil {
@@ -159,6 +172,7 @@ func (task *Task) checkCycle(cycle int64) error {
 			}
 			// will skip if already sign exit
 			if status.ExitEpoch != math.MaxUint64 {
+				logrus.Infof("validator %d will exit at epoch %d", validator.ValidatorIndex, status.ExitEpoch)
 				continue
 			}
 
@@ -166,9 +180,19 @@ func (task *Task) checkCycle(cycle int64) error {
 			totalSecondsPassed := prysmTime.Now().Unix() - int64(task.eth2Config.GenesisTime)
 			currentEpoch := types.Epoch(uint64(totalSecondsPassed) / uint64(task.eth2Config.SlotsPerEpoch*task.eth2Config.SecondsPerSlot))
 
+			// not active
+			if status.ActivationEpoch < uint64(currentEpoch) {
+				logrus.Warnf("validator %d is not active and can't exit, will skip", validator.ValidatorIndex)
+				continue
+			}
+			if currentEpoch < types.Epoch(status.ActivationEpoch)+shardCommitteePeriod {
+				logrus.Warnf("validator %d is not active long enough and can't exit, will skip", validator.ValidatorIndex)
+				continue
+			}
+
 			exit := &ethpb.VoluntaryExit{Epoch: currentEpoch, ValidatorIndex: types.ValidatorIndex(validator.ValidatorIndex)}
 
-			domain, err := task.connection.Eth2Client().GetDomainData(params.BeaconConfig().DomainVoluntaryExit[:], uint64(exit.Epoch))
+			domain, err := task.connection.Eth2Client().GetDomainData(domainVoluntaryExit[:], uint64(exit.Epoch))
 			if err != nil {
 				return errors.Wrap(err, "Get domainData failed")
 			}
@@ -188,6 +212,8 @@ func (task *Task) checkCycle(cycle int64) error {
 			if err != nil {
 				return err
 			}
+
+			logrus.Infof("validator %d broadcast voluntary exit ok", validator.ValidatorIndex)
 
 		}
 	}

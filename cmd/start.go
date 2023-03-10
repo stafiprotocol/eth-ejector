@@ -122,6 +122,8 @@ func startCmd() *cobra.Command {
 				logrus.Info("pubkeyBtes: ", pubkey.String())
 			}
 
+			logrus.Infof("find %d active validators", len(validators))
+
 			t := task.NewTask(validators, connection)
 			err = t.Start()
 			if err != nil {
