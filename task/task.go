@@ -95,9 +95,13 @@ func (task *Task) monitorHandler() {
 				time.Sleep(6 * time.Second)
 				continue
 			}
+			logrus.Debugf("startCycle: %d, currentCycle: %d", startCycle.Uint64(), currentCycle.Uint64())
 
 			start := startCycle.Int64()
 			end := currentCycle.Int64()
+			if start == 0 {
+				start = end - 20
+			}
 			for i := start; i <= end; {
 				err := task.checkCycle(i)
 				if err != nil {

@@ -59,6 +59,17 @@ func startCmd() *cobra.Command {
 			if len(consensusEndpoint) == 0 {
 				return fmt.Errorf("%s empty", flagConsensusEndpoint)
 			}
+
+			logLevelStr, err := cmd.Flags().GetString(flagLogLevel)
+			if err != nil {
+				return err
+			}
+			logLevel, err := logrus.ParseLevel(logLevelStr)
+			if err != nil {
+				return err
+			}
+			logrus.SetLevel(logLevel)
+
 			logrus.Infof("%s: %s", flagKeysDir, keysDir)
 			logrus.Infof("%s: %s", flagExecutionEndpoint, executionEndpoint)
 			logrus.Infof("%s: %s", flagConsensusEndpoint, consensusEndpoint)
@@ -70,17 +81,12 @@ func startCmd() *cobra.Command {
 				return errors.Wrap(err, "parseKeysDir failed")
 			}
 
-			for _, keystore := range keystores {
-				logrus.Info("keystore", keystore)
-			}
-
 			accountsPassword, err := prompt.PasswordPrompt(
 				"Enter the password for your imported accounts", prompt.NotEmpty,
 			)
 			if err != nil {
 				return fmt.Errorf("could not read account password: %w", err)
 			}
-			logrus.Info("accountsPassword: ", accountsPassword)
 
 			connection, err := shared.NewConnection(executionEndpoint, consensusEndpoint, nil, nil, nil)
 			if err != nil {
@@ -102,8 +108,12 @@ func startCmd() *cobra.Command {
 					continue
 				}
 				keys[pubkey.String()] = pubkey.String()
+				beaconHead, err := connection.Eth2Client().GetBeaconHead()
+				if err != nil {
+					return err
+				}
 
-				status, err := connection.GetValidatorStatus(pubkey, &beacon.ValidatorStatusOptions{})
+				status, err := connection.Eth2Client().GetValidatorStatus(pubkey, &beacon.ValidatorStatusOptions{Epoch: &beaconHead.FinalizedEpoch})
 				if err != nil {
 					return err
 				}
@@ -119,7 +129,7 @@ func startCmd() *cobra.Command {
 				}
 
 				validators[validator.ValidatorIndex] = &validator
-				logrus.Info("pubkeyBtes: ", pubkey.String())
+				logrus.Info("pubkeyHexString: ", pubkey.String())
 			}
 
 			logrus.Infof("find %d active validators", len(validators))
