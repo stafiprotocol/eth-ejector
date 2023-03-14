@@ -145,7 +145,7 @@ func (task *Task) monitorHandler() {
 			logrus.Debug("checkCycle end -----------")
 		}
 
-		time.Sleep(15 * time.Second)
+		time.Sleep(60 * time.Second)
 	}
 }
 
@@ -167,16 +167,20 @@ func (task *Task) checkCycle(cycle int64) error {
 			if syncStatus.Syncing {
 				return errors.New("could not perform exit: beacon node is syncing.")
 			}
-
+			beaconHead, err := task.connection.Eth2Client().GetBeaconHead()
+			if err != nil {
+				return err
+			}
 			// check exited before
 			pubkey := sharedTypes.BytesToValidatorPubkey(validator.Publickey)
-			status, err := task.connection.GetValidatorStatus(pubkey, &beacon.ValidatorStatusOptions{})
+			status, err := task.connection.GetValidatorStatus(pubkey, &beacon.ValidatorStatusOptions{Epoch: &beaconHead.Epoch})
 			if err != nil {
 				return err
 			}
 			// will skip if already sign exit
 			if status.ExitEpoch != math.MaxUint64 {
 				logrus.Infof("validator %d will exit at epoch %d", validator.ValidatorIndex, status.ExitEpoch)
+				delete(task.validators, status.Index)
 				continue
 			}
 
@@ -210,7 +214,6 @@ func (task *Task) checkCycle(cycle int64) error {
 				return errors.Wrap(err, "failed to initialize keys caches from account keystore")
 			}
 			sig := secretKey.Sign(exitRoot[:])
-			// signedExit := &ethpb.SignedVoluntaryExit{Exit: exit, Signature: sig.Marshal()}
 
 			err = task.connection.Eth2Client().ExitValidator(validator.ValidatorIndex, uint64(currentEpoch), sharedTypes.BytesToValidatorSignature(sig.Marshal()))
 			if err != nil {
