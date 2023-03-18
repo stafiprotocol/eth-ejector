@@ -13,7 +13,6 @@ import (
 	"github.com/prysmaticlabs/prysm/v3/crypto/bls"
 	"github.com/prysmaticlabs/prysm/v3/encoding/bytesutil"
 	ethpb "github.com/prysmaticlabs/prysm/v3/proto/prysm/v1alpha1"
-	prysmTime "github.com/prysmaticlabs/prysm/v3/time"
 	"github.com/sirupsen/logrus"
 	"github.com/stafiprotocol/eth2-balance-service/shared"
 	"github.com/stafiprotocol/eth2-balance-service/shared/beacon"
@@ -184,20 +183,19 @@ func (task *Task) checkCycle(cycle int64) error {
 				continue
 			}
 
-			// will sign and broadcast exit msg
-			totalSecondsPassed := prysmTime.Now().Unix() - int64(task.eth2Config.GenesisTime)
-			currentEpoch := types.Epoch(uint64(totalSecondsPassed) / uint64(task.eth2Config.SlotsPerEpoch*task.eth2Config.SecondsPerSlot))
+			currentEpoch := types.Epoch(beaconHead.Epoch)
 
 			// not active
-			if status.ActivationEpoch < uint64(currentEpoch) {
-				logrus.Warnf("validator %d is not active and can't exit, will skip", validator.ValidatorIndex)
+			if uint64(currentEpoch) < status.ActivationEpoch {
+				logrus.Warnf("validator %d is not active and can't exit, will skip, active epoch: %d current epoch: %d", validator.ValidatorIndex, status.ActivationEpoch, currentEpoch)
 				continue
 			}
 			if currentEpoch < types.Epoch(status.ActivationEpoch)+shardCommitteePeriod {
-				logrus.Warnf("validator %d is not active long enough and can't exit, will skip", validator.ValidatorIndex)
+				logrus.Warnf("validator %d is not active long enough and can't exit, will skip, active epoch: %d current epoch: %d", validator.ValidatorIndex, status.ActivationEpoch, currentEpoch)
 				continue
 			}
 
+			// will sign and broadcast exit msg
 			exit := &ethpb.VoluntaryExit{Epoch: currentEpoch, ValidatorIndex: types.ValidatorIndex(validator.ValidatorIndex)}
 
 			domain, err := task.connection.Eth2Client().GetDomainData(domainVoluntaryExit[:], uint64(exit.Epoch))
