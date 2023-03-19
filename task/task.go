@@ -1,8 +1,13 @@
 package task
 
 import (
+	"bytes"
+	"encoding/json"
+	"fmt"
+	"io"
 	"math"
 	"math/big"
+	"net/http"
 	"time"
 
 	withdraw "eth-ejector/bindings/Withdraw"
@@ -20,20 +25,27 @@ import (
 )
 
 // testnet
-var withdrawAddress = "0xc386e551c828e0b3f0A4AB2241e1e0F051f74496"
+var (
+	withdrawAddress = "0xc386e551c828e0b3f0A4AB2241e1e0F051f74496"
+	postUptimeUrl   = "https://test-drop-api.stafi.io/reth/v1/uploadEjectorUptime"
+)
 
-// mainnet
+// todo mainnet config
 // var withdrawAddress = "0xc386e551c828e0b3f0A4AB2241e1e0F051f74496"
+// var postUptimeUrl = "'https://test-drop-api.stafi.io/reth/v1/uploadEjectorUptime"
 
-var domainVoluntaryExit = bytesutil.Uint32ToBytes4(0x04000000)
-var shardCommitteePeriod = types.Epoch(256) // ShardCommitteePeriod is the minimum amount of epochs a validator must participate before exiting.
+var (
+	domainVoluntaryExit  = bytesutil.Uint32ToBytes4(0x04000000)
+	shardCommitteePeriod = types.Epoch(256) // ShardCommitteePeriod is the minimum amount of epochs a validator must participate before exiting.
+)
 
 type Task struct {
-	stop             chan struct{}
-	validators       map[uint64]*Validator
-	connection       *shared.Connection
-	withdrawContract *withdraw.Withdraw
-	eth2Config       *beacon.Eth2Config
+	stop              chan struct{}
+	validators        map[uint64]*Validator
+	notExitValidators map[string]*Validator
+	connection        *shared.Connection
+	withdrawContract  *withdraw.Withdraw
+	eth2Config        *beacon.Eth2Config
 }
 
 type Validator struct {
@@ -42,11 +54,12 @@ type Validator struct {
 	PrivateKey     []byte
 }
 
-func NewTask(validators map[uint64]*Validator, connection *shared.Connection) *Task {
+func NewTask(validators map[uint64]*Validator, notExitValidators map[string]*Validator, connection *shared.Connection) *Task {
 	s := &Task{
-		stop:       make(chan struct{}),
-		validators: validators,
-		connection: connection,
+		stop:              make(chan struct{}),
+		validators:        validators,
+		notExitValidators: notExitValidators,
+		connection:        connection,
 	}
 	return s
 }
@@ -65,6 +78,7 @@ func (task *Task) Start() error {
 	task.eth2Config = &ethConfig
 
 	SafeGoWithRestart(task.monitorHandler)
+	SafeGoWithRestart(task.uptimeHandler)
 	return nil
 }
 
@@ -142,9 +156,43 @@ func (task *Task) monitorHandler() {
 				}
 			}
 			logrus.Debug("checkCycle end -----------")
+
+			logrus.Debug("checkNotExitPubkey start -----------")
+			err = task.checkNotExitPubkey()
+			if err != nil {
+				logrus.Warnf("checkNotExitPubkey err: %s", err)
+				time.Sleep(6 * time.Second)
+				continue
+			}
+
+			logrus.Debug("checkNotExitPubkey end -----------")
+
 		}
 
 		time.Sleep(60 * time.Second)
+	}
+}
+
+func (task *Task) uptimeHandler() {
+
+	for {
+		select {
+		case <-task.stop:
+			logrus.Info("task has stopped")
+			return
+		default:
+			logrus.Debug("postUptime start -----------")
+			err := task.postUptime()
+			if err != nil {
+				logrus.Warnf("postUptime err: %s", err)
+				time.Sleep(6 * time.Second)
+				continue
+			}
+
+			logrus.Debug("postUptime end -----------")
+		}
+
+		time.Sleep(5 * time.Minute)
 	}
 }
 
@@ -223,4 +271,74 @@ func (task *Task) checkCycle(cycle int64) error {
 		}
 	}
 	return nil
+}
+
+func (task *Task) checkNotExitPubkey() error {
+	for key, val := range task.notExitValidators {
+		beaconHead, err := task.connection.Eth2Client().GetBeaconHead()
+		if err != nil {
+			return err
+		}
+		pubkey, err := sharedTypes.HexToValidatorPubkey(key)
+		if err != nil {
+			return err
+		}
+		status, err := task.connection.GetValidatorStatus(pubkey, &beacon.ValidatorStatusOptions{Epoch: &beaconHead.Epoch})
+		if err != nil {
+			return err
+		}
+		// will skip if already sign exit
+		if status.Exists {
+			val.ValidatorIndex = status.Index
+			task.validators[status.Index] = val
+
+			delete(task.notExitValidators, key)
+		}
+	}
+	return nil
+}
+
+func (task *Task) postUptime() error {
+	valIndexList := make([]uint64, 0)
+	for key := range task.validators {
+		valIndexList = append(valIndexList, key)
+	}
+	req := ReqEjectorUptime{
+		ValidatorIndexList: valIndexList,
+	}
+
+	jsonValue, err := json.Marshal(req)
+	if err != nil {
+		return err
+	}
+
+	rsp, err := http.Post(postUptimeUrl, "application/json", bytes.NewReader(jsonValue))
+	if err != nil {
+		return err
+	}
+	defer rsp.Body.Close()
+
+	body, err := io.ReadAll(rsp.Body)
+	if err != nil {
+		return err
+	}
+	rspUptime := RspUptime{}
+
+	err = json.Unmarshal(body, &rspUptime)
+	if err != nil {
+		return err
+	}
+	if rspUptime.Status != "80000" {
+		return fmt.Errorf("post uptime err: %s", rspUptime.Status)
+	}
+	return nil
+}
+
+type RspUptime struct {
+	Status  string      `json:"status"`
+	Message string      `json:"message"`
+	Data    interface{} `json:"data"`
+}
+type ReqEjectorUptime struct {
+	ValidatorIndexList []uint64 `json:"validatorIndexList"` //hex string list
 }

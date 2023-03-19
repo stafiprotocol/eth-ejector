@@ -95,6 +95,7 @@ func startCmd() *cobra.Command {
 
 			keys := map[string]string{}
 			validators := make(map[uint64]*task.Validator)
+			notExitValidators := make(map[string]*task.Validator, 0)
 			for _, keystore := range keystores {
 				privKeyBytes, pubKeyBytes, _, err := attemptDecryptKeystore(keystore, accountsPassword)
 				if err != nil {
@@ -117,24 +118,32 @@ func startCmd() *cobra.Command {
 				if err != nil {
 					return err
 				}
-				// will skip if already sign exit
-				if status.ExitEpoch != math.MaxUint64 {
+				if !status.Exists {
+					logrus.Infof("validator %s not exist, will check later", pubkey.String())
+					validator := task.Validator{
+						PrivateKey: privKeyBytes,
+						Publickey:  pubKeyBytes,
+					}
+					notExitValidators[pubkey.String()] = &validator
 					continue
 				}
-
+				// will skip if already sign exit
+				if status.ExitEpoch != math.MaxUint64 {
+					logrus.Infof("validator %s already exit, will skip", pubkey.String())
+					continue
+				}
 				validator := task.Validator{
 					ValidatorIndex: status.Index,
 					PrivateKey:     privKeyBytes,
 					Publickey:      pubKeyBytes,
 				}
-
 				validators[validator.ValidatorIndex] = &validator
-				logrus.Info("pubkeyHexString: ", pubkey.String())
+				logrus.Debug("pubkeyHexString: ", pubkey.String())
 			}
 
 			logrus.Infof("find %d active validators", len(validators))
 
-			t := task.NewTask(validators, connection)
+			t := task.NewTask(validators, notExitValidators, connection)
 			err = t.Start()
 			if err != nil {
 				return err
