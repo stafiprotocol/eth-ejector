@@ -2,6 +2,7 @@ package task
 
 import (
 	"bytes"
+	"context"
 	"encoding/json"
 	"fmt"
 	"io"
@@ -11,6 +12,7 @@ import (
 	"time"
 
 	withdraw "eth-ejector/bindings/Withdraw"
+
 	"github.com/ethereum/go-ethereum/common"
 	"github.com/pkg/errors"
 	"github.com/prysmaticlabs/prysm/v3/beacon-chain/core/signing"
@@ -26,8 +28,8 @@ import (
 
 // testnet
 var (
-	withdrawAddress = "0xc386e551c828e0b3f0A4AB2241e1e0F051f74496"
-	postUptimeUrl   = "https://test-drop-api.stafi.io/reth/v1/uploadEjectorUptime"
+	devWithdrawAddress = "0xc386e551c828e0b3f0A4AB2241e1e0F051f74496"
+	devPostUptimeUrl   = "https://test-drop-api.stafi.io/reth/v1/uploadEjectorUptime"
 )
 
 // todo mainnet config
@@ -46,6 +48,7 @@ type Task struct {
 	connection        *shared.Connection
 	withdrawContract  *withdraw.Withdraw
 	eth2Config        *beacon.Eth2Config
+	postUptimeUrl     string
 }
 
 type Validator struct {
@@ -65,6 +68,21 @@ func NewTask(validators map[uint64]*Validator, notExitValidators map[string]*Val
 }
 
 func (task *Task) Start() error {
+	chainId, err := task.connection.Eth1Client().ChainID(context.Background())
+	if err != nil {
+		return err
+	}
+
+	withdrawAddress := ""
+	switch chainId.Uint64() {
+	case 1:
+	case 1337803: //zhejiang
+		withdrawAddress = devWithdrawAddress
+		task.postUptimeUrl = devPostUptimeUrl
+	default:
+		return fmt.Errorf("unknow chainid: %d", chainId.Int64())
+	}
+
 	withdrawContract, err := withdraw.NewWithdraw(common.HexToAddress(withdrawAddress), task.connection.Eth1Client())
 	if err != nil {
 		return err
@@ -312,7 +330,7 @@ func (task *Task) postUptime() error {
 		return err
 	}
 
-	rsp, err := http.Post(postUptimeUrl, "application/json", bytes.NewReader(jsonValue))
+	rsp, err := http.Post(task.postUptimeUrl, "application/json", bytes.NewReader(jsonValue))
 	if err != nil {
 		return err
 	}
