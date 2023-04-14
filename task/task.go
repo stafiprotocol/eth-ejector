@@ -30,11 +30,11 @@ import (
 var (
 	devWithdrawAddress = "0xc386e551c828e0b3f0A4AB2241e1e0F051f74496"
 	devPostUptimeUrl   = "https://test-drop-api.stafi.io/reth/v1/uploadEjectorUptime"
-)
 
-// todo mainnet config
-// var withdrawAddress = "0xc386e551c828e0b3f0A4AB2241e1e0F051f74496"
-// var postUptimeUrl = "'https://test-drop-api.stafi.io/reth/v1/uploadEjectorUptime"
+	// mainnet config
+	mainnetWithdrawAddress = "0x27d64Dd9172E4b59a444817D30F7af8228F174CC"
+	mainnetPostUptimeUrl   = "https://drop-api.stafi.io/reth/v1/uploadEjectorUptime"
+)
 
 var (
 	domainVoluntaryExit  = bytesutil.Uint32ToBytes4(0x04000000)
@@ -75,7 +75,9 @@ func (task *Task) Start() error {
 
 	withdrawAddress := ""
 	switch chainId.Uint64() {
-	case 1:
+	case 1: //mainnet
+		withdrawAddress = mainnetWithdrawAddress
+		task.postUptimeUrl = mainnetPostUptimeUrl
 	case 1337803: //zhejiang
 		withdrawAddress = devWithdrawAddress
 		task.postUptimeUrl = devPostUptimeUrl
