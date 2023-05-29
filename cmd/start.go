@@ -1,6 +1,7 @@
 package cmd
 
 import (
+	"context"
 	"eth-ejector/task"
 	"fmt"
 	"math"
@@ -91,6 +92,26 @@ func startCmd() *cobra.Command {
 			connection, err := shared.NewConnection(executionEndpoint, consensusEndpoint, nil, nil, nil)
 			if err != nil {
 				return errors.Wrap(err, "Start connection with endpoint failed")
+			}
+
+			// check rpc on start
+			{
+				block, err := connection.Eth1Client().BlockNumber(context.Background())
+				if err != nil {
+					return fmt.Errorf("check executionEndpoint: %s , request failed: %s", executionEndpoint, err.Error())
+				}
+				if block == 0 {
+					return fmt.Errorf("check executionEndpoint: %s , request failed: latest block is zero", executionEndpoint)
+				}
+
+				beaconHead, err := connection.Eth2Client().GetBeaconHead()
+				if err != nil {
+					return fmt.Errorf("check consensusEndpoint: %s , request failed: %s", consensusEndpoint, err.Error())
+				}
+
+				if beaconHead.FinalizedEpoch == 0 {
+					return fmt.Errorf("check consensusEndpoint: %s , request failed: finalized epoch is zero", consensusEndpoint)
+				}
 			}
 
 			keys := map[string]string{}
