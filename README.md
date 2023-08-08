@@ -46,7 +46,7 @@ Example:
 ```
 git clone https://github.com/stafiprotocol/eth-ejector.git
 cd eth-ejector
-git checkout v0.3.1
+git checkout v0.3.2
 make build
 ./build/eth-ejector start --keys_dir /home/stafi/eth2.0/validator_keys --consensus_endpoint https://beacon.zhejiang.ethpandaops.io  --execution_endpoint https://rpc.zhejiang.ethpandaops.io
 ```
